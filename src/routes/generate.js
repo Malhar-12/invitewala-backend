@@ -8,17 +8,22 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // POST /generate  — AI invitation text (requires auth)
 router.post("/", requireAuth, async (req, res) => {
   try {
-    const { occasionName, senderName, recipName, date, time, location, note, language } = req.body;
+    const { occasionName, senderName, recipName, date, time, location, note, language, promptHint } = req.body;
 
     if (!occasionName || !senderName)
       return res.status(400).json({ error: "occasionName and senderName required" });
 
-    const prompt = `Write a warm ${occasionName} invitation in ${language || "English"}.
+    const lang = language || "English";
+    const style = promptHint || `Write a warm ${occasionName} invitation.`;
+
+    const prompt = `${style}
+The ENTIRE invitation MUST be written in ${lang}. Every word, greeting, closing — everything in ${lang}. Do NOT mix languages.
 Sender: ${senderName}. Guest: ${recipName || "Guests"}.
-${date ? `Date: ${date},` : ""} ${time ? `Time: ${time},` : ""} ${location ? `Venue: ${location}.` : ""}
+${date ? `Date: ${date}.` : ""} ${time ? `Time: ${time}.` : ""} ${location ? `Venue: ${location}.` : ""}
 ${note ? `Special note: ${note}` : ""}
-Write 3-4 warm, heartfelt sentences. Add 1-2 relevant emojis naturally. End with "— ${senderName}".
-Return ONLY the invitation text, nothing else.`;
+Write 3-4 heartfelt sentences matching the tone described above. Add 1-2 relevant emojis naturally. End with "— ${senderName}".
+Do not include jokes, sarcasm or inappropriate lines. Keep it natural and meaningful.
+Return ONLY the invitation text in ${lang}, nothing else.`;
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
