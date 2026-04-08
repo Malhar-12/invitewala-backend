@@ -1,96 +1,133 @@
+// ═══════════════════════════════════════════════════════════════
+// Invite Routes — CRUD for saved invitations
+// ═══════════════════════════════════════════════════════════════
 const express = require("express");
-const { v4: uuidv4 } = require("uuid");
 const { requireAuth } = require("./auth");
-const { getDb } = require("../db/database");
+const { getSupabase } = require("../db/database");
 
 const router = express.Router();
 
+const MAX_INVITES_PER_USER = 500;
+
+const ALLOWED_TONES = new Set([
+  "heartfelt", "formal", "poetic", "traditional", "festive", "funny",
+]);
+
 function sanitize(str, maxLen = 200) {
-  if (!str || typeof str !== "string") return "";
-  return str.trim().slice(0, maxLen).replace(/[<>]/g, "");
+  if (str === undefined || str === null) return null;
+  if (typeof str !== "string") return null;
+  const v = str.trim().slice(0, maxLen).replace(/[<>]/g, "");
+  return v || null;
 }
 
-// GET /invites — list user's saved invites
+// ═══ GET /invites — list user's saved invites ════════════════════
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const db = getDb();
-    const rows = await db
-      .prepare(
-        `SELECT id, occasion_id, occasion_name, sender_name, recip_name,
-                event_date, event_time, location, note, language, template_id,
-                generated_text, created_at
-         FROM invites WHERE user_id = ? ORDER BY created_at DESC LIMIT 50`
+    const supabase = getSupabase();
+    const { data, error } = await supabase
+      .from("invites")
+      .select(
+        "id, occasion_id, occasion_name, sender_name, recip_name, event_date, event_time, location, note, language, template_id, generated_text, photo_url, music_id, font_id, family_members, tithi, tone, short_code, view_count, rsvp_yes, rsvp_no, rsvp_maybe, created_at"
       )
-      .all(req.userId);
-    res.json({ invites: rows || [] });
+      .eq("user_id", req.userId)
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (error) {
+      console.error("get invites error:", error.message);
+      return res.status(500).json({ error: "Server error" });
+    }
+    return res.json({ invites: data || [] });
   } catch (e) {
-    console.error("Get invites error:", e.message);
-    res.status(500).json({ error: "Server error" });
+    console.error("get invites exception:", e.message);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
-// POST /invites — save a new invite
+// ═══ POST /invites — save a new invite ══════════════════════════
 router.post("/", requireAuth, async (req, res) => {
   try {
-    const occasionId = sanitize(req.body.occasionId, 50);
-    const occasionName = sanitize(req.body.occasionName, 100);
-    const senderName = sanitize(req.body.senderName, 100);
-    const recipName = sanitize(req.body.recipName, 100);
-    const eventDate = sanitize(req.body.eventDate, 30);
-    const eventTime = sanitize(req.body.eventTime, 20);
-    const location = sanitize(req.body.location, 200);
-    const note = sanitize(req.body.note, 500);
-    const language = sanitize(req.body.language, 10);
-    const templateId = sanitize(req.body.templateId, 20);
-    const generatedText = sanitize(req.body.generatedText, 2000);
+    const supabase = getSupabase();
 
-    if (!occasionId || !senderName)
-      return res.status(400).json({ error: "occasionId and senderName required" });
-
-    const db = getDb();
-
-    // Limit invites per user
-    const count = await db.prepare("SELECT COUNT(*) as cnt FROM invites WHERE user_id = ?").get(req.userId);
-    if (count && count.cnt >= 500) {
-      return res.status(429).json({ error: "Maximum 500 saved invites reached." });
+    // Quota check
+    const { count, error: countErr } = await supabase
+      .from("invites")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", req.userId);
+    if (countErr) {
+      console.error("count error:", countErr.message);
+      return res.status(500).json({ error: "Server error" });
+    }
+    if ((count || 0) >= MAX_INVITES_PER_USER) {
+      return res.status(429).json({ error: `Maximum ${MAX_INVITES_PER_USER} saved invites reached.` });
     }
 
-    const id = uuidv4();
-    await db.prepare(`
-      INSERT INTO invites
-        (id, user_id, occasion_id, occasion_name, sender_name, recip_name,
-         event_date, event_time, location, note, language, template_id, generated_text)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id, req.userId, occasionId, occasionName, senderName,
-      recipName || null, eventDate || null, eventTime || null,
-      location || null, note || null,
-      language || "en", templateId || "luxe", generatedText || null
-    );
+    const tone = sanitize(req.body.tone, 30);
 
-    res.status(201).json({ id });
+    const payload = {
+      user_id:        req.userId,
+      occasion_id:    sanitize(req.body.occasionId, 50),
+      occasion_name:  sanitize(req.body.occasionName, 100),
+      sender_name:    sanitize(req.body.senderName, 100),
+      recip_name:     sanitize(req.body.recipName, 100),
+      event_date:     sanitize(req.body.eventDate, 30),
+      event_time:     sanitize(req.body.eventTime, 20),
+      location:       sanitize(req.body.location, 200),
+      note:           sanitize(req.body.note, 500),
+      language:       sanitize(req.body.language, 10) || "en",
+      template_id:    sanitize(req.body.templateId, 30) || "luxe",
+      generated_text: sanitize(req.body.generatedText, 2000),
+      photo_url:      sanitize(req.body.photoUrl, 500),
+      music_id:       sanitize(req.body.musicId, 50),
+      font_id:        sanitize(req.body.fontId, 50) || "default",
+      family_members: sanitize(req.body.familyMembers, 500),
+      tithi:          sanitize(req.body.tithi, 100),
+      tone:           tone && ALLOWED_TONES.has(tone) ? tone : "heartfelt",
+    };
+
+    if (!payload.occasion_id || !payload.sender_name) {
+      return res.status(400).json({ error: "occasionId and senderName required" });
+    }
+
+    const { data, error } = await supabase
+      .from("invites")
+      .insert(payload)
+      .select("id, short_code")
+      .single();
+
+    if (error) {
+      console.error("insert invite error:", error.message);
+      return res.status(500).json({ error: "Server error" });
+    }
+    return res.status(201).json({ id: data.id, shortCode: data.short_code });
   } catch (e) {
-    console.error("Save invite error:", e.message);
-    res.status(500).json({ error: "Server error" });
+    console.error("save invite exception:", e.message);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 
-// DELETE /invites/:id
+// ═══ DELETE /invites/:id ═════════════════════════════════════════
 router.delete("/:id", requireAuth, async (req, res) => {
   try {
     const id = sanitize(req.params.id, 50);
     if (!id) return res.status(400).json({ error: "Invalid invite ID" });
 
-    const db = getDb();
-    const result = await db
-      .prepare("DELETE FROM invites WHERE id = ? AND user_id = ?")
-      .run(id, req.userId);
-    if (result.changes === 0)
-      return res.status(404).json({ error: "Invite not found" });
-    res.json({ success: true });
+    const supabase = getSupabase();
+    const { error, count } = await supabase
+      .from("invites")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("user_id", req.userId);
+
+    if (error) {
+      console.error("delete invite error:", error.message);
+      return res.status(500).json({ error: "Server error" });
+    }
+    if (!count) return res.status(404).json({ error: "Invite not found" });
+    return res.json({ success: true });
   } catch (e) {
-    console.error("Delete invite error:", e.message);
-    res.status(500).json({ error: "Server error" });
+    console.error("delete invite exception:", e.message);
+    return res.status(500).json({ error: "Server error" });
   }
 });
 

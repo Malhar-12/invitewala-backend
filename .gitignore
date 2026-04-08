@@ -1,3 +1,19 @@
 node_modules/
 .env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Firebase admin credentials — NEVER commit
+firebase-service-account.json
+firebase-adminsdk-*.json
+*-firebase-adminsdk-*.json
+
+# Local databases (legacy)
 *.db
+*.sqlite
+*.sqlite3
+data/

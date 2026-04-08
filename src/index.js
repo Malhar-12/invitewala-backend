@@ -1,3 +1,6 @@
+// ═══════════════════════════════════════════════════════════════
+// Nimantran API — main server entry
+// ═══════════════════════════════════════════════════════════════
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -5,70 +8,67 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
 const { initDb } = require("./db/database");
-const authRouter     = require("./routes/auth");
-const generateRouter = require("./routes/generate");
-const invitesRouter  = require("./routes/invites");
+const { initFirebase } = require("./lib/firebase");
 
-const app  = express();
+const authRouter = require("./routes/auth");
+const generateRouter = require("./routes/generate");
+const invitesRouter = require("./routes/invites");
+const rsvpRouter = require("./routes/rsvp");
+
+const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ── Security Middleware ─────────────────────────────────
-// Helmet adds security headers (XSS protection, no-sniff, etc.)
-app.use(helmet());
+// ── Security headers ────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: false, // not serving HTML
+  crossOriginEmbedderPolicy: false,
+}));
 
-// CORS — only allow your app, not the whole internet
-const ALLOWED_ORIGINS = [
-  "https://invitewala-backend-1.onrender.com",
-  "http://localhost:3001",
-  "http://localhost:19006", // Expo web dev
-];
+// ── CORS ────────────────────────────────────────────────
+// Mobile apps don't send Origin, so we allow no-origin requests.
+// Browser RSVP page is also allowed (any origin) since it's public read.
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow mobile apps (no origin header) and allowed origins
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, true); // Mobile apps don't send origin, so allow all for now
-    }
-  },
-  methods: ["GET", "POST", "DELETE"],
+  origin: true,
+  methods: ["GET", "POST", "PATCH", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-// Body parser with size limit (prevent large payload attacks)
-app.use(express.json({ limit: "10kb" }));
+// ── Body parser with strict size limit ───────────────────
+app.use(express.json({ limit: "100kb" }));
 
-// Trust proxy for rate limiting behind Render's proxy
+// ── Trust proxy (Render is behind one) ───────────────────
 app.set("trust proxy", 1);
 
-// Rate limiting — 60 req/min per IP (global)
-app.use(rateLimit({
+// ── Rate limits ─────────────────────────────────────────
+const globalLimiter = rateLimit({
   windowMs: 60_000,
-  max: 60,
+  max: 90,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please slow down." },
-}));
+});
 
-// Tighter limit on AI generation (costs money)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 30,
+  message: { error: "Too many auth attempts. Try again later." },
+});
+
 const genLimiter = rateLimit({
   windowMs: 60_000,
-  max: 10,
-  message: { error: "Too many generation requests, please wait a minute." },
+  max: 15,
+  message: { error: "Too many generation requests. Wait a minute." },
 });
 
-// Auth rate limit — prevent brute force
-const authLimiter = rateLimit({
-  windowMs: 15 * 60_000, // 15 minutes
-  max: 20, // 20 attempts per 15 min
-  message: { error: "Too many login attempts, please try again later." },
-});
+app.use(globalLimiter);
 
 // ── Routes ──────────────────────────────────────────────
-app.get("/health", (_req, res) => res.json({ status: "ok", version: "1.1.0" }));
-app.use("/auth",     authLimiter, authRouter);
+app.get("/health", (_req, res) => res.json({ status: "ok", version: "2.0.0" }));
+
+app.use("/auth", authLimiter, authRouter);
 app.use("/generate", genLimiter, generateRouter);
-app.use("/invites",  invitesRouter);
+app.use("/invites", invitesRouter);
+app.use("/rsvp", rsvpRouter);
 
 // 404
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
@@ -79,14 +79,17 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-initDb()
-  .then(() => {
+// ── Boot ────────────────────────────────────────────────
+(async () => {
+  try {
+    initFirebase();
+    await initDb();
     app.listen(PORT, () => {
-      console.log(`\n🚀 Nimantran API running on port ${PORT}`);
+      console.log(`\n🚀 Nimantran API v2 running on port ${PORT}`);
       console.log(`   Health: http://localhost:${PORT}/health\n`);
     });
-  })
-  .catch((err) => {
-    console.error("Failed to initialize database:", err);
+  } catch (e) {
+    console.error("Failed to start:", e);
     process.exit(1);
-  });
+  }
+})();
