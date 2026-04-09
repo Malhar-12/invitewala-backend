@@ -37,6 +37,41 @@ const ALLOWED_LANGS = new Set([
 ]);
 
 // ═══════════════════════════════════════════════════════════════
+// POST /auth/guest
+// Guest-only mode (pre-Firebase-Blaze). Creates a lightweight
+// "guest" user row (no phone, no PII) and returns a session JWT.
+// When Firebase is re-enabled, guests can be upgraded by calling
+// /auth/phone/verify — we match by firebase_uid then.
+// ═══════════════════════════════════════════════════════════════
+router.post("/guest", async (req, res) => {
+  try {
+    const supabase = getSupabase();
+    const guestTag = `guest_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const { data: user, error } = await supabase
+      .from("users")
+      .insert({
+        firebase_uid: guestTag,
+        phone: guestTag,
+        tier: "free",
+      })
+      .select()
+      .single();
+    if (error) {
+      console.error("guest insert error:", error.message);
+      return res.status(500).json({ error: "Could not create guest" });
+    }
+    audit("guest_register", { userId: user.id, req });
+    return res.json({
+      token: makeSessionToken(user.id),
+      user: { id: user.id, tier: user.tier, guest: true },
+    });
+  } catch (e) {
+    console.error("guest error:", e.message);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
 // POST /auth/phone/verify
 // Body: { idToken: string }      (Firebase phone-auth ID token)
 // Returns: { token, user }
