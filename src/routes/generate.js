@@ -146,7 +146,8 @@ router.post("/", requireAuth, async (req, res) => {
       : "";
 
     const prompt = `${style}
-The ENTIRE invitation MUST be written in ${lang}. Every word in ${lang}. Do NOT mix languages.
+The ENTIRE invitation MUST be written in ${lang}. Every single word MUST be in ${lang} — including the occasion/event name. Do NOT keep any English words. Translate EVERYTHING.
+For example, if the occasion is "Naming Ceremony" and language is Marathi, write "बारसे" or "नामकरण सोहळा", NOT "Naming Ceremony". If language is Hindi, write "नामकरण संस्कार". Always use the culturally correct term in ${lang}.
 This is a GROUP invitation — sent to MANY people, not one person.
 Tone: ${toneDesc}.
 
@@ -157,12 +158,13 @@ CRITICAL RULES:
 4. Stay completely gender-neutral. No gendered host words.
 5. Use group-friendly language ("you all", "everyone", "सर्वांना", "सभी").
 6. Add 1-2 relevant emojis naturally within the text.
-7. No jokes (unless tone is funny), no sarcasm, no inappropriate lines. Keep it natural and meaningful.${familyLine}
+7. No jokes (unless tone is funny), no sarcasm, no inappropriate lines. Keep it natural and meaningful.
+8. NEVER use any English words when writing in a non-English language. Translate occasion names, greetings, and all terms to ${lang}.${familyLine}
 
-Context — Sender: ${senderName}. ${date ? `Date: ${date}.` : ""} ${time ? `Time: ${time}.` : ""} ${location ? `Venue: ${location}.` : ""}
+Context — Occasion: ${occasionName}. Sender: ${senderName}. ${date ? `Date: ${date}.` : ""} ${time ? `Time: ${time}.` : ""} ${location ? `Venue: ${location}.` : ""}
 ${note ? `Special note: ${note}` : ""}
 
-Return ONLY the invitation body in ${lang}. No greeting, no closing, no sender name.`;
+Return ONLY the invitation body in ${lang}. No greeting, no closing, no sender name. Zero English words.`;
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
